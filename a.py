@@ -12,7 +12,7 @@ class VAE(nn.Module):
             nn.Linear(hidden_dim, feature_dim),
         )
         
-        self.mu = nn.Linear(feature_dim, latent_dim)
+        self.mean = nn.Linear(feature_dim, latent_dim)
         self.log_var = nn.Linear(feature_dim, latent_dim)
         
         self.decoder = nn.Sequential(
@@ -23,9 +23,53 @@ class VAE(nn.Module):
             nn.Linear(hidden_dim, state_dim)
         )
         
+    def reparameterize(self, mean, log_var):
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mean + eps * std
+        
     def encode(self, x):
         h = self.encoder(x)
-        return self.mu(h), self.log_var(h)
+        mean = self.mean(h)
+        log_var = self.log_var(h)
+        z = self.reparameterize(mean, log_var)
+        return mean, log_var, z
     
     def decode(self, z):
         return self.decoder(z)
+
+        
+class MDN_LSTM(nn.Module):
+    def __init__(self, state_dim, hidden_dim=256):
+        super().__init__()        
+        self.W_forget = nn.Linear(
+            state_dim + hidden_dim,
+            hidden_dim
+        )
+
+        self.W_input = nn.Linear(
+            state_dim + hidden_dim,
+            hidden_dim
+        )
+
+        self.W_memory = nn.Linear(
+            state_dim + hidden_dim,
+            hidden_dim
+        )
+
+        self.W_output = nn.Linear(
+            state_dim + hidden_dim,
+            hidden_dim
+        )
+        
+    def lstm_step(self, state, short_m, long_m):
+        combined = torch.cat([state, short_m], dim=-1)
+        
+        f = torch.sigmoid(self.W_forget(combined))
+        i = torch.sigmoid(self.W_input(combined))
+        candidate_m = torch.tanh(self.W_memory(combined))
+        o = torch.sigmoid(self.W_output(combined))
+        
+        long_m = f * long_m + i * candidate_m
+        short_m = o * torch.tanh(long_m)
+        return short_m, long_m
