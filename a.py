@@ -40,36 +40,57 @@ class VAE(nn.Module):
 
         
 class MDN_LSTM(nn.Module):
-    def __init__(self, state_dim, hidden_dim=256):
+    def __init__(self, input_dim, hidden_dim=256, num_gaussian=5, latent_dim=16):
         super().__init__()        
-        self.W_forget = nn.Linear(
-            state_dim + hidden_dim,
-            hidden_dim
-        )
-
-        self.W_input = nn.Linear(
-            state_dim + hidden_dim,
-            hidden_dim
-        )
-
-        self.W_memory = nn.Linear(
-            state_dim + hidden_dim,
-            hidden_dim
-        )
-
-        self.W_output = nn.Linear(
-            state_dim + hidden_dim,
-            hidden_dim
-        )
+        self.W_forget = nn.Linear(input_dim + hidden_dim, hidden_dim)
+        self.W_input = nn.Linear(input_dim + hidden_dim, hidden_dim)
+        self.W_memory = nn.Linear(input_dim + hidden_dim, hidden_dim)
+        self.W_output = nn.Linear(input_dim + hidden_dim, hidden_dim)
         
-    def lstm_step(self, state, short_m, long_m):
-        combined = torch.cat([state, short_m], dim=-1)
+        self.probability = nn.Linear(hidden_dim, num_gaussian)
+        self.mean = nn.Linear(hidden_dim, num_gaussian * latent_dim)
+        self.log_std = nn.Linear(hidden_dim, num_gaussian * latent_dim)
+        self.num_gaussian = num_gaussian
+        self.latent_dim = latent_dim
         
-        f = torch.sigmoid(self.W_forget(combined))
-        i = torch.sigmoid(self.W_input(combined))
+    def lstm_step(self, x, h_prev, c_prev):
+        combined = torch.cat([x, h_prev], dim=-1)
+        
+        forget_gate = torch.sigmoid(self.W_forget(combined))
+        input_gate = torch.sigmoid(self.W_input(combined))
         candidate_m = torch.tanh(self.W_memory(combined))
-        o = torch.sigmoid(self.W_output(combined))
+        output_gate = torch.sigmoid(self.W_output(combined))
         
-        long_m = f * long_m + i * candidate_m
-        short_m = o * torch.tanh(long_m)
-        return short_m, long_m
+        c_new = forget_gate * c_prev + input_gate * candidate_m
+        h_new = output_gate * torch.tanh(c_new)
+        return c_new, h_new
+        
+    def forward(self, a, z, h, c):
+        x = torch.cat([a, z], dim=-1)
+        c, h = self.lstm_step(x, h, c)
+        
+        probability = F.softmax(self.probability(h), dim=-1)
+        
+        mean = self.mean(h)
+        mean = mean.view(-1, self.num_gaussian, self.latent_dim)
+        
+        log_std = self.log_std(h)
+        log_std = log_std.view(-1, self.num_gaussian, self.latent_dim)
+        std = torch.exp(log_std)
+              
+        return c, h, probability, mean, std
+        
+        
+class Controller(nn.Module)
+    def __init__(self, action_dim, latent_dim=16, hidden_dim=256):
+        super().__init__()      
+        self.fc = nn.Linear(latent_dim + hidden_dim, action_dim)
+        
+    def forward(self, z, h):
+        x = torch.cat([z, h], dim=-1)
+        action = torch.tanh(self.fc(x))
+        return action
+        
+        
+
+        
