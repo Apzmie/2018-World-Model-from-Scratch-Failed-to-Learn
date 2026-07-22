@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
 class VAE(nn.Module):
@@ -81,7 +82,7 @@ class MDN_LSTM(nn.Module):
         return c, h, probability, mean, std
         
         
-class Controller(nn.Module)
+class Controller(nn.Module):
     def __init__(self, action_dim, latent_dim=16, hidden_dim=256):
         super().__init__()      
         self.fc = nn.Linear(latent_dim + hidden_dim, action_dim)
@@ -90,7 +91,30 @@ class Controller(nn.Module)
         x = torch.cat([z, h], dim=-1)
         action = torch.tanh(self.fc(x))
         return action
+
         
-        
+class CMA_ES:
+    def __init__(self, dim, controller_weights, population=64, sigma=0.5):
+        self.mean = controller_weights.copy()       
+        self.dim = dim
+        self.population = population
+        self.sigma = sigma
+    
+    def sample_population(self):
+        candidates = []
+        for _ in range(self.population):
+            noise = np.random.randn(self.dim)
+            candidate_params = self.mean + self.sigma * noise
+            candidates.append(candidate_params)
+            
+        return candidates
+    
+    def update(self):
+    
+
+
+
+
+
 
         
