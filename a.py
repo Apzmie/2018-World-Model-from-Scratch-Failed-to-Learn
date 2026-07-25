@@ -41,12 +41,12 @@ class VAE(nn.Module):
 
         
 class MDN_LSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim=256, num_gaussian=5, latent_dim=16):
+    def __init__(self, action_dim, hidden_dim=256, num_gaussian=5, latent_dim=16):
         super().__init__()        
-        self.W_forget = nn.Linear(input_dim + hidden_dim, hidden_dim)
-        self.W_input = nn.Linear(input_dim + hidden_dim, hidden_dim)
-        self.W_memory = nn.Linear(input_dim + hidden_dim, hidden_dim)
-        self.W_output = nn.Linear(input_dim + hidden_dim, hidden_dim)
+        self.W_forget = nn.Linear(action_dim + latent_dim + hidden_dim, hidden_dim)
+        self.W_input = nn.Linear(action_dim + latent_dim + hidden_dim, hidden_dim)
+        self.W_memory = nn.Linear(action_dim + latent_dim + hidden_dim, hidden_dim)
+        self.W_output = nn.Linear(action_dim + latent_dim + hidden_dim, hidden_dim)
         
         self.probability = nn.Linear(hidden_dim, num_gaussian)
         self.mean = nn.Linear(hidden_dim, num_gaussian * latent_dim)
@@ -93,24 +93,54 @@ class Controller(nn.Module):
         return action
 
         
-class CMA_ES:
-    def __init__(self, dim, controller_weights, population=64, sigma=0.5):
-        self.mean = controller_weights.copy()       
-        self.dim = dim
-        self.population = population
-        self.sigma = sigma
-    
-    def sample_population(self):
-        candidates = []
-        for _ in range(self.population):
-            noise = np.random.randn(self.dim)
-            candidate_params = self.mean + self.sigma * noise
-            candidates.append(candidate_params)
-            
+class Diagonal_CMA_ES:
+    def __init__(self, num_params, candidate_size=24, selected_ratio=0.25, exploration_scale=0.5, exploration_decay=0.99, learning_rate=0.2):
+        self.num_params = num_params
+        self.mean = np.zeros(num_params)
+        self.variance = np.ones(num_params)
+        
+        self.candidate_size = candidate_size
+        self.num_selected = int(candidate_size * selected_ratio)
+
+        self.exploration_scale = exploration_scale
+        self.exploration_decay = exploration_decay       
+        self.learning_rate = learning_rate
+
+    def sample(self):
+        noise = np.random.randn(self.candidate_size, self.num_params)
+        candidates = self.mean + self.exploration_scale * noise * np.sqrt(self.variance)
         return candidates
+
+    def update(self, candidates, rewards):
+        ranked_indices = np.argsort(rewards)[::-1]
+        selected = candidates[ranked_indices[:self.num_selected]]
+
+        old_mean = self.mean.copy()
+        self.mean = np.mean(selected, axis=0)
+
+        distances = selected - old_mean
+        new_variance = np.mean(distances ** 2, axis=0)
+
+        self.variance = (1 - self.learning_rate) * self.variance + self.learning_rate * new_variance
+        self.variance = np.clip(self.variance, 1e-8, None)
+        
+        self.exploration_scale = self.exploration_scale * self.exploration_decay
+
+    def best_candidate(self):
+        return self.mean
     
-    def update(self):
-    
+
+class WorldModel(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super().__init__()
+        self.vae = VAE(state_dim)
+        self.mdn_lstm = MDN_LSTM(action_dim)
+        
+    def vae_loss(self, state):
+        mean, log_var, z = self.vae(state)
+        reconstructed = self.vae.decode(z)
+        reconstruction_loss = F.mse_loss(reconstructed, state)
+
 
 
 
