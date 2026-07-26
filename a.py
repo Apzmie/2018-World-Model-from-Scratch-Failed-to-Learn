@@ -137,9 +137,32 @@ class WorldModel(nn.Module):
         self.mdn_lstm = MDN_LSTM(action_dim)
         
     def vae_loss(self, state):
-        mean, log_var, z = self.vae(state)
+        mean, log_var, z = self.vae.encode(state)
         reconstructed = self.vae.decode(z)
         reconstruction_loss = F.mse_loss(reconstructed, state)
+        distribution_loss = -0.5 * torch.mean(torch.sum(1 + log_var - mean.pow(2) - log_var.exp(), dim=1))
+        loss = reconstruction_loss + distribution_loss
+        
+        return reconstruction_loss, distribution_loss, loss
+        
+    def mdn_loss(self, target_z, mean, std, probability):
+        """
+        target_z: (batch, latent_dim)
+        mean: (batch, num_gaussian, latent_dim)
+        std: (batch, num_gaussian, latent_dim)
+        probability: (batch, num_gaussian)
+        """   
+        target_z = target_z.unsqueeze(1)
+
+        normal = torch.distributions.Normal(mean, std)
+        component_log_prob = normal.log_prob(target_z)
+        vector_log_prob = torch.sum(component_log_prob, dim=-1)
+
+        gaussian_log_prob = torch.log(probability + 1e-8)
+
+        log_likelihood = torch.logsumexp(vector_log_prob + gaussian_log_prob, dim=1)
+        loss = -torch.mean(log_likelihood)
+        return loss
 
 
 
