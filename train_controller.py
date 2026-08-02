@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-from world_model_2018 import WorldModel  
+from world_model_2018 import WorldModel, Agent 
 
 BASE_DIR = ""
         
@@ -27,55 +27,76 @@ if __name__ == "__main__":
     agent = Agent(action_dim)
     writer = SummaryWriter(log_dir=BASE_DIR)
     
+    generation = 0
     best_reward = -float("inf")
     
     while True:
-        decision_steps, terminal_steps = env.get_steps(behavior_name)
-        agent_ids = decision_steps.agent_id
+        candidates = agent.sample_candidates()
+        rewards = []
         
-        if len(agent_ids) > 0:
-            states_tensor = torch.from_numpy(decision_steps.obs[0]).to(torch.float32)
-            with torch.no_grad():
-                _, _, start_z = world_model.vae.encode(states_tensor)
-                
-            candidates = agent.sample_candidates()
-            rewards = []
+        for candidate in candidates:
+            agent.set_parameters(candidate)
+            env.reset()
             
-            for params in candidates:
-                agent.set_parameters(params)              
-                z = start_z.clone()
-                num_agents = len(agent_ids)
-                
-                summary = torch.zeros(num_agents, 256)
-                memory = torch.zeros(num_agents, 256)                
-                total_reward = torch.zeros(num_agents)
-                
-                for t in range(1000):
-                    with torch.no_grad():
-                        action = agent.controller(z, summary)
-                        
-                        summary, memory, probability, mean, std, reward = world_model.mdn_lstm(action, z, summary, memory)
+            steps = 0
+            total_reward = 0
+            
+            summary = None
+            memory = None
+            prev_action = None
 
-                        z = world_model.sample_next_z(probability, mean, std)
+            done = False            
+            while steps < 1000:
+                decision_steps, terminal_steps = env.get_steps(behavior_name)
+                agent_ids = decision_steps.agent_id
+                if len(agent_ids) > 0:
+                    num_agents = len(agent_ids)
+                    if summary is None:
+                        summary = torch.zeros(num_agents, 256)
+                        memory = torch.zeros(num_agents, 256)
+                        prev_action = torch.zeros(num_agents, action_dim)
+                    states_tensor = torch.from_numpy(decision_steps.obs[0]).to(torch.float32)
+                    with torch.no_grad():
+                        mean, _, _ = world_model.vae.encode(states_tensor)
                         
-                        total_reward += reward.squeeze(-1)
+                        summary, memory, _, _, _ = world_model.mdn_lstm(prev_action, mean, summary, memory)
+                        action = agent.get_action(mean, summary)
                         
-                rewards.append(total_reward.mean().item())
-            
-            rewards = np.array(rewards)
-            current_best = rewards.max()
-            
-            agent.es.update(candidates, rewards) 
-            
-            if current_best > best_reward:
-                best_reward = current_best
+                    action_np = action.cpu().numpy()
+                    env.set_actions(behavior_name, ActionTuple(continuous=action_np))
+                    prev_action = action.detach()
+                    
+                env.step()
+                steps += 1
+                next_decision_steps, terminal_steps = env.get_steps(behavior_name)
                 
-                agent.set_parameters(agent.es.best_candidate())
-                torch.save(agent.controller.state_dict(), f"{BASE_DIR}/controller.pth")
-                print(f"[Train] Model saved at new best reward {best_reward:.4f}") 
+                for i, agent_id in enumerate(agent_ids):
+                    if agent_id in terminal_steps:
+                        reward = terminal_steps[agent_id].reward
+                        done = True
+                        break
+                    elif agent_id in next_decision_steps:
+                        reward = next_decision_steps[agent_id].reward
+                    else:
+                        continue
+                        
+                    total_reward += reward
+                    
+            rewards.append(total_reward)
             
-            else:
-                agent.set_parameters(agent.es.best_candidate())
-                               
-        env.step()
-       
+        rewards = np.array(rewards)       
+        agent.es.update(candidates, rewards)
+        agent.set_parameters(agent.es.best_candidate())        
+        generation += 1
+        
+        best = np.max(rewards)
+        mean = np.mean(rewards)
+        
+        writer.add_scalar("Train/best_reward", best, generation)
+        writer.add_scalar("Train/mean_reward", mean, generation)
+        
+        if best > best_reward:
+            best_reward = best
+            torch.save(agent.controller.state_dict(), f"{BASE_DIR}/controller.pth")
+            print(f"[Train] Model saved at new best reward {best_reward:.4f}")                
+                
