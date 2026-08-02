@@ -28,6 +28,7 @@ if __name__ == "__main__":
     total_steps = 0
     trajectories = {}
     best_loss = float("inf")
+    count = 0
 
     while total_steps < 100000:
         decision_steps, terminal_steps = env.get_steps(behavior_name)
@@ -47,20 +48,11 @@ if __name__ == "__main__":
                 trajectories[agent_id] = {
                     "states": [],
                     "actions": [],
-                    "rewards": [],
                     "dones": []
                 }
-                       
-            if agent_id in terminal_steps:
-                reward = terminal_steps[agent_id].reward
-            elif agent_id in next_decision_steps:
-                reward = next_decision_steps[agent_id].reward
-            else:
-                continue
                 
             trajectories[agent_id]["states"].append(state_tensor[i].numpy().copy())
             trajectories[agent_id]["actions"].append(random_action[i].copy())
-            trajectories[agent_id]["rewards"].append(reward.copy())
             trajectories[agent_id]["dones"].append(agent_id in terminal_ids)
         
         total_steps += len(agent_ids)
@@ -68,38 +60,24 @@ if __name__ == "__main__":
     
     while True:
         total_loss = 0
-        count = 0
-        
         for agent_id, traj in trajectories.items():
             states = torch.tensor(np.array(traj["states"]), dtype=torch.float32)
             actions = torch.tensor(np.array(traj["actions"]), dtype=torch.float32)
             dones = traj["dones"]
 
             with torch.no_grad():
-                _, _, z = world_model.vae.encode(states)
+                means, _, _ = world_model.vae.encode(states)
+                zs = means
 
-            summary = torch.zeros(1,256)
-            memory = torch.zeros(1,256)
-
-            for t in range(len(actions)-1):
-                loss, summary, memory = world_model.update_mdn(actions[t:t+1], z[t:t+1], summary, memory, z[t+1:t+2], rewards[t:t+1])
-                    
-                total_loss = total_loss + loss
-
-                count += 1
-                if dones[t]:
-                    summary.zero_()
-                    memory.zero_()
-        
-        total_loss = total_loss / count
-        
-        world_model.mdn_optimizer.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(world_model.mdn_lstm.parameters(), 1.0)
-        world_model.mdn_optimizer.step()
-        
-        if total_loss.item() < best_loss:
-            best_loss = total_loss.item()                 
+            loss = world_model.update_mdn(actions, zs, dones)
+            total_loss += loss
+            
+        total_loss /= len(trajectories) 
+        count += 1 
+        writer.add_scalar("Train/mdn_lstm_loss", total_loss, count) 
+            
+        if total_loss < best_loss:
+            best_loss = total_loss                 
             torch.save(world_model.mdn_lstm.state_dict(), f"{BASE_DIR}/mdn_lstm.pth")
             print(f"[Train] Model saved at new best loss {best_loss:.4f}") 
         
