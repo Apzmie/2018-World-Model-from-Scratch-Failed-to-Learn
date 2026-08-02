@@ -51,7 +51,6 @@ class MDN_LSTM(nn.Module):
         self.probability = nn.Linear(hidden_dim, num_distribution)
         self.mean = nn.Linear(hidden_dim, num_distribution * latent_dim)
         self.log_std = nn.Linear(hidden_dim, num_distribution * latent_dim)
-        self.reward = nn.Linear(hidden_dim, 1)
         self.num_distribution = num_distribution
         self.latent_dim = latent_dim
         
@@ -78,11 +77,11 @@ class MDN_LSTM(nn.Module):
         
         log_std = self.log_std(summary)
         log_std = log_std.view(-1, self.num_distribution, self.latent_dim)
-        std = torch.exp(log_std)
         
-        reward = self.reward(summary)
+        log_std = torch.clamp(log_std, -5, 2)
+        std = torch.exp(log_std)
               
-        return summary, memory, probability, mean, std, reward
+        return summary, memory, probability, mean, std
             
 
 class WorldModel(nn.Module):
@@ -112,29 +111,48 @@ class WorldModel(nn.Module):
             "vae_loss": loss.item(),
         }
     
-    def update_mdn(self, action, z, summary, memory, target_z, target_reward):
+    def update_mdn(self, actions, zs, dones, hidden_dim=256):
         """
         target_z: (batch, latent_dim)
         mean: (batch, num_distribution, latent_dim)
         std: (batch, num_distribution, latent_dim)
         probability: (batch, num_distribution)
-        """   
-        summary, memory, probability, mean, std, reward = self.mdn_lstm(action, z, summary, memory)
+        """
+        summary = torch.zeros(1, hidden_dim)
+        memory = torch.zeros(1, hidden_dim)
         
-        target_z = target_z.unsqueeze(1)
-
-        normal = torch.distributions.Normal(mean, std)
-        element_log_prob = normal.log_prob(target_z)
-        sum_log_prob = torch.sum(element_log_prob, dim=-1)
-
-        distribution_log_prob = torch.log(probability + 1e-8)
-
-        log_likelihood = torch.logsumexp(sum_log_prob + distribution_log_prob, dim=1)
-        latent_loss = -torch.mean(log_likelihood)
-        reward_loss = F.mse_loss(reward, target_reward)
-        loss = latent_loss + reward_loss
+        total_loss = 0
+        count = 0
         
-        return loss, summary, memory
+        for t in range(len(actions) - 1):           
+            summary, memory, probability, mean, std = self.mdn_lstm(actions[t:t+1], zs[t:t+1], summary, memory)
+        
+            target_z = zs[t+1:t+2].unsqueeze(1)
+
+            normal = torch.distributions.Normal(mean, std)
+            element_log_prob = normal.log_prob(target_z).sum(dim=-1)
+            distribution_log_prob = torch.log(probability + 1e-8)
+
+            loss = -torch.mean(torch.logsumexp(element_log_prob + distribution_log_prob, dim=1))
+        
+            total_loss += loss
+            count += 1
+        
+            if dones[t]:
+                summary = torch.zeros_like(summary)
+                memory = torch.zeros_like(memory)
+            else:
+                summary = summary.detach()
+                memory = memory.detach()
+                
+        total_loss /= count
+        
+        self.mdn_optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.mdn_lstm.parameters(), 1.0)
+        self.mdn_optimizer.step()
+        
+        return total_loss.item()
     
     def sample_next_z(self, probability, mean, std):
         distribution_idx = torch.distributions.Categorical(probability).sample()
