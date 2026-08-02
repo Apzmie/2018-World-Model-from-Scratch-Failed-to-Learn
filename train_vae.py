@@ -43,9 +43,9 @@ if __name__ == "__main__":
         for i, agent_id in enumerate(agent_ids):
             state = states_tensor[i].cpu().numpy()                
             states.append(state.copy())
-        states = np.array(states, dtype=np.float32)
             
     while True:
+        states = np.array(states, dtype=np.float32)
         indices = np.random.permutation(len(states))
         
         reconstruction_losses = []
