@@ -1,1 +1,2 @@
 # Under-Construction
+World model is a next-state predictor. If an MLP outputs next-state, this MLP is a world model. To predict more accurately, 2018 world model paper suggests a structure: VAE (Variational Autoencoder) + LSTM-MDN (Long Short-Term Memory - Mixture Density Network). VAE converts state into latent representation to extract important features, LSTM-MDN remembers past flow and uses this memory to output a distribution over possible next-states to represent future uncertainty.
