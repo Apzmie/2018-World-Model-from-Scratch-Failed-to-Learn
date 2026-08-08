@@ -170,8 +170,9 @@ class Controller(nn.Module):
         self.fc = nn.Linear(latent_dim + hidden_dim, action_dim)
         
     def forward(self, z, summary):
-        x = torch.cat([z, summary], dim=-1)
-        action = torch.tanh(self.fc(x))
+        action = torch.cat([z, summary], dim=-1)
+        action = self.fc(x)
+        # action = torch.tanh(action)
         return action
         
     
