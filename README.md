@@ -10,6 +10,9 @@ In Unity 3D Articulation environment, training seems to be difficult due to pred
 Directly sampling (```latent ∼ N(mean, std)```) makes gradient tracking difficult, so VAE uses ```latent = mean + std x eps``` to preserve both randomness and gradient flow. MDN uses the same formula to output NextLatent, but gradients are not needed, so it is not called reparameterization.
 
 ### VAE Loss
+Reconstruction Loss: To make the reconstructed output as similar as possible to the original input.
+
+Distribution Loss: To make the latent distribution similar to N(0,I), so that nearby points can represent similar or mixed data. Mean is pushed toward 0, and LogVar is pushed toward 0 as well. This makes Var 1 and Std 1, resulting in N(0,I). But latent values need to be different to make reconstruction easier, so latent distribution will not become exactly N(0,I) and the two losses will find a balance.
 
 ### MDN Loss
 
