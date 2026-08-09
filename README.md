@@ -6,5 +6,12 @@ In Unity 3D Articulation environment, training seems to be difficult due to pred
 ## World Model
 ![world_model](images/world_model.png)
 
+### VAE Reparameterization
+Directly sampling (```latent ∼ N(mean, std)```) makes gradient tracking difficult, so VAE uses ```latent = mean + std x eps``` to preserve both randomness and gradient flow. MDN uses the same formula to output NextLatent, but gradients are not needed, so it is not called reparameterization.
+
+### VAE Loss
+
+### MDN Loss
+
 ## Controller
 ![controller](images/controller.png)
