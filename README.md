@@ -15,6 +15,10 @@ Reconstruction Loss: To make the reconstructed output as similar as possible to 
 Distribution Loss: To make the latent distribution similar to N(0,I), so that nearby points can represent similar or mixed data. Mean is pushed toward 0, and LogVar is pushed toward 0 as well. This makes Var 1 and Std 1, resulting in N(0,I). But latent values need to be different to make reconstruction easier, so latent distribution will not become exactly N(0,I) and the two losses will find a balance.
 
 ### MDN Loss
+Increase the probability of NextLatent in the latent distribution, and multiply it by the probability of each mixture distribution to show how much each distribution contributes.
 
 ## Controller
 ![controller](images/controller.png)
+
+### CMA-ES vs Diagonal CMA-ES
+Covariance Matrix Adaptation uses both variance and covariance in the matrix, allowing it to capture relationships between neural network parameters. If the number of parameters increases, it requires more memory and computational time. So, a diagonal version that only considers the diagonal elements (variances) can be used, but leading to lower optimization performance because it cannot capture relationships. Implementing the original CMA-ES is complex, so I implement the diagonal version, which can be represented as a vector rather than a matrix.
